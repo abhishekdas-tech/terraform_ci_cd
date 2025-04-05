@@ -38,7 +38,7 @@ resource "iosxe_prefix_list" "zscaler_ip_range" {
   prefix_list_description = [
     {
       name        = "Zscaler_IP_Range"
-      description = "All the Zscaler Datacenter IP addresses"
+      description = "All the Zscaler Datacenter IP addresses version 1"
     }
   ]
 }

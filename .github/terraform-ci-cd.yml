@@ -1,0 +1,123 @@
+name: "Terraform CI/CD to push Zscaler IPS to Cisco devices"
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-zscaler-ips:
+    name: "Fetch and Format Zscaler IPs"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      
+      - name: Install Python Dependencies
+        run: pip install requests
+      
+      - name: Run Python Script to Fetch and Format JSON
+        run: python fetch_zscaler_ips.py
+      
+      - name: Upload IP JSON as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zscaler-ip-json
+          path: zscaler_ip_range.json
+
+  plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: fetch-zscaler-ips
+    if: github.ref == 'refs/heads/dev' || (github.event.pull_request.merged == true && github.ref == 'refs/heads/main')
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Download Zscaler IP JSON
+        uses: actions/download-artifact@v4
+        with:
+          name: zscaler-ip-json
+      
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: "us-east-1"
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+        env:
+          TF_VAR_username: ${{ secrets.CISCO_USERNAME }}
+          TF_VAR_password: ${{ secrets.CISCO_PASSWORD }} 
+      
+      - name: Save Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: tfplan
+
+  deploy:
+    name: "Terraform Apply"
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.event.pull_request.merged == true && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+
+      - name: Download Zscaler IP JSON
+        uses: actions/download-artifact@v4
+        with:
+          name: zscaler-ip-json
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: "us-east-1"
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_username: ${{ secrets.CISCO_USERNAME }}
+          TF_VAR_password: ${{ secrets.CISCO_PASSWORD }}
